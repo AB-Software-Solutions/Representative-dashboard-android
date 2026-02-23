@@ -1,0 +1,121 @@
+import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
+
+import { createVotingInfo, createWhiteVote, fetchParties } from "../../../api/parties";
+
+export const fetchAsyncParties = createAsyncThunk(
+  "parties/fetch",
+  async (_, { rejectWithValue }) => {
+    try {
+      return await fetchParties();
+    } catch (e) {
+      return rejectWithValue(e?.message || "Failed to fetch political affiliations");
+    }
+  }
+);
+
+export const createAsyncVotingInfo = createAsyncThunk(
+  "parties/createVotingInfo",
+  async ({ politicalAffiliationId, memberId }, { rejectWithValue }) => {
+    try {
+      return await createVotingInfo({ politicalAffiliationId, memberId });
+    } catch (e) {
+      return rejectWithValue(e?.message || "Failed to add voting info");
+    }
+  }
+);
+
+export const createAsyncWhiteVote = createAsyncThunk(
+  "parties/createWhiteVote",
+  async (_, { rejectWithValue }) => {
+    try {
+      return await createWhiteVote();
+    } catch (e) {
+      return rejectWithValue(e?.message || "Failed to add white vote");
+    }
+  }
+);
+
+const initialState = {
+  list: [],
+  status: "idle",
+  error: null,
+  createVoteStatus: "idle",
+  createVoteError: null,
+  lastCreatedVote: null,
+  createWhiteVoteStatus: "idle",
+  createWhiteVoteError: null,
+  lastCreatedWhiteVote: null,
+  raw: null,
+};
+
+const partiesSlice = createSlice({
+  name: "parties",
+  initialState,
+  reducers: {
+    clearParties: (state) => {
+      state.list = [];
+      state.status = "idle";
+      state.error = null;
+      state.raw = null;
+    },
+  },
+  extraReducers: (builder) => {
+    builder
+      .addCase(fetchAsyncParties.pending, (state) => {
+        state.status = "loading";
+        state.error = null;
+      })
+      .addCase(fetchAsyncParties.fulfilled, (state, action) => {
+        state.status = "succeeded";
+        state.raw = action.payload;
+        const payload = action.payload;
+        if (payload?.politicalAffiliations && Array.isArray(payload.politicalAffiliations)) {
+          state.list = payload.politicalAffiliations;
+        } else if (payload?.parties && Array.isArray(payload.parties)) {
+          state.list = payload.parties;
+        } else if (payload?.data && Array.isArray(payload.data)) {
+          state.list = payload.data;
+        } else if (Array.isArray(payload)) {
+          state.list = payload;
+        } else {
+          state.list = [];
+        }
+      })
+      .addCase(fetchAsyncParties.rejected, (state, action) => {
+        state.status = "failed";
+        state.error = action.payload || action.error?.message || "Failed to fetch parties";
+      })
+      .addCase(createAsyncVotingInfo.pending, (state) => {
+        state.createVoteStatus = "loading";
+        state.createVoteError = null;
+        state.lastCreatedVote = null;
+      })
+      .addCase(createAsyncVotingInfo.fulfilled, (state, action) => {
+        state.createVoteStatus = "succeeded";
+        state.lastCreatedVote = action.payload;
+      })
+      .addCase(createAsyncVotingInfo.rejected, (state, action) => {
+        state.createVoteStatus = "failed";
+        state.createVoteError =
+          action.payload || action.error?.message || "Failed to add voting info";
+      })
+      .addCase(createAsyncWhiteVote.pending, (state) => {
+        state.createWhiteVoteStatus = "loading";
+        state.createWhiteVoteError = null;
+        state.lastCreatedWhiteVote = null;
+      })
+      .addCase(createAsyncWhiteVote.fulfilled, (state, action) => {
+        state.createWhiteVoteStatus = "succeeded";
+        state.lastCreatedWhiteVote = action.payload;
+      })
+      .addCase(createAsyncWhiteVote.rejected, (state, action) => {
+        state.createWhiteVoteStatus = "failed";
+        state.createWhiteVoteError =
+          action.payload || action.error?.message || "Failed to add white vote";
+      });
+  },
+});
+
+export const { clearParties } = partiesSlice.actions;
+export default partiesSlice.reducer;
+
