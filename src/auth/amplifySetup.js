@@ -1,3 +1,6 @@
+import "react-native-url-polyfill/auto";
+import "react-native-get-random-values";
+
 import { Amplify } from "aws-amplify";
 
 import { getAmplifyEnvConfig, validateAmplifyConfig } from "./amplifyConfig";
