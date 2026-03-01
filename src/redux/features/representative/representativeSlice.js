@@ -1,4 +1,5 @@
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
+import NetInfo from "@react-native-community/netinfo";
 
 import {
   fetchRepresentativeProfile,
@@ -6,13 +7,31 @@ import {
   fetchVoterById,
   markVoterVoted,
 } from "../../../api/representative";
+import { database } from "../../../db/database";
+import {
+  getCachedVoterById,
+  queryCachedVoters,
+  setVoterPendingVote,
+  updateVoterVoteState,
+} from "../../../db/helpers";
+import { enqueueOutboxItem, OUTBOX_TYPE } from "../../../offline/outbox";
 
 export const fetchAsyncMyVoters = createAsyncThunk(
   "representative/fetchMyVoters",
   async ({ page = 1, limit = 20, filters = {} } = {}, { rejectWithValue }) => {
     try {
+      const net = await NetInfo.fetch();
+      const online = Boolean(net?.isConnected && net?.isInternetReachable !== false);
+      if (!online) {
+        const cached = await queryCachedVoters(database, { page, limit, filters });
+        return { data: { voters: cached.voters, total: cached.total, fromCache: true }, page, limit, fromCache: true };
+      }
+
       const data = await fetchRepresentativeVoters({ page, limit, ...filters });
-      return { data, page, limit };
+
+      const voters = data?.voters || data?.data || (Array.isArray(data) ? data : []);
+
+      return { data, page, limit, fromCache: false };
     } catch (e) {
       return rejectWithValue(e?.message || "Failed to fetch my voters");
     }
@@ -23,7 +42,18 @@ export const markAsyncVoterVoted = createAsyncThunk(
   "representative/markVoterVoted",
   async ({ voterId }, { rejectWithValue }) => {
     try {
+      const net = await NetInfo.fetch();
+      const online = Boolean(net?.isConnected && net?.isInternetReachable !== false);
+      if (!online) {
+        await enqueueOutboxItem({ type: OUTBOX_TYPE.MARK_VOTED, payload: { voterId } });
+        await setVoterPendingVote(database, voterId, true);
+        return { queued: true, voterId };
+      }
+
       const data = await markVoterVoted({ voterId });
+      // Do not upsert full datasets after login hydration; only update minimal state.
+      await updateVoterVoteState(database, voterId, { hasVoted: true, pendingVote: false, raw: data });
+      await setVoterPendingVote(database, voterId, false);
       return data;
     } catch (e) {
       return rejectWithValue(e?.message || "Failed to mark voter as voted");
@@ -47,6 +77,14 @@ export const fetchAsyncVoterById = createAsyncThunk(
   "representative/fetchVoterById",
   async ({ voterId }, { rejectWithValue }) => {
     try {
+      const net = await NetInfo.fetch();
+      const online = Boolean(net?.isConnected && net?.isInternetReachable !== false);
+      if (!online) {
+        const cached = await getCachedVoterById(database, voterId);
+        if (cached) return cached;
+        return rejectWithValue("Offline and voter not in cache yet");
+      }
+
       const data = await fetchVoterById({ voterId });
       return data;
     } catch (e) {
@@ -67,6 +105,7 @@ const initialState = {
   error: null,
   markVoteStatus: "idle",
   markVoteError: null,
+  lastMarkVoteResult: null,
   voter: null,
   voterStatus: "idle",
   voterError: null,
@@ -83,6 +122,15 @@ const representativeSlice = createSlice({
       state.status = "idle";
       state.error = null;
       state.raw = null;
+    },
+    applySyncedVoterUpdate: (state, action) => {
+      const voterId = action.payload?.voterId;
+      const updated = action.payload?.updated;
+      if (!voterId || !updated) return;
+      const idx = state.myVoters.findIndex((v) => v?.id === voterId || v?.id === updated?.id);
+      if (idx !== -1) {
+        state.myVoters[idx] = { ...(state.myVoters[idx] || {}), ...(updated || {}), pendingVote: false };
+      }
     },
   },
   extraReducers: (builder) => {
@@ -131,15 +179,23 @@ const representativeSlice = createSlice({
       .addCase(markAsyncVoterVoted.pending, (state) => {
         state.markVoteStatus = "loading";
         state.markVoteError = null;
+        state.lastMarkVoteResult = null;
       })
       .addCase(markAsyncVoterVoted.fulfilled, (state, action) => {
         state.markVoteStatus = "succeeded";
         const updated = action.payload;
         const voterId = action.meta?.arg?.voterId;
+        state.lastMarkVoteResult = updated;
+
+        if (updated?.queued) {
+          const idxQueued = state.myVoters.findIndex((v) => v?.id === voterId);
+          if (idxQueued !== -1) state.myVoters[idxQueued] = { ...(state.myVoters[idxQueued] || {}), pendingVote: true };
+          return;
+        }
         const idx = state.myVoters.findIndex((v) => v?.id === (updated?.id ?? voterId));
         if (idx !== -1) {
           // Merge so we don't accidentally lose fields if the API returns a partial payload.
-          state.myVoters[idx] = { ...(state.myVoters[idx] || {}), ...(updated || {}), id: state.myVoters[idx]?.id ?? voterId };
+          state.myVoters[idx] = { ...(state.myVoters[idx] || {}), ...(updated || {}), pendingVote: false, id: state.myVoters[idx]?.id ?? voterId };
         }
       })
       .addCase(markAsyncVoterVoted.rejected, (state, action) => {
@@ -161,6 +217,6 @@ const representativeSlice = createSlice({
   },
 });
 
-export const { clearMyVoters } = representativeSlice.actions;
+export const { clearMyVoters, applySyncedVoterUpdate } = representativeSlice.actions;
 export default representativeSlice.reducer;
 

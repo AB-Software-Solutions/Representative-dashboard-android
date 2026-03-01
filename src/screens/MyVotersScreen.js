@@ -37,7 +37,7 @@ export default function MyVotersScreen({ navigation }) {
   const { user } = useAuth();
   const theme = useTheme();
 
-  const { myVoters, total, status, error, markVoteStatus } = useSelector(
+  const { myVoters, total, status, error, markVoteStatus, lastMarkVoteResult } = useSelector(
     (s) => s.representative
   );
   const markVoteError = useSelector((s) => s.representative.markVoteError);
@@ -77,12 +77,16 @@ export default function MyVotersScreen({ navigation }) {
 
   useEffect(() => {
     if (markVoteStatus === "succeeded") {
+      if (lastMarkVoteResult?.queued) {
+        setSnack("Offline: action queued. It will sync automatically when you're online.");
+      } else {
       setSnack("Successfully Added Voter's Voted Confirmation.");
       // Re-fetch current page so the list reflects server truth after mutation.
       if (canView) dispatch(fetchAsyncMyVoters({ page: page + 1, limit: rowsPerPage, filters: appliedFilters }));
+      }
     }
     if (markVoteStatus === "failed") setSnack(markVoteError || "Action failed");
-  }, [markVoteStatus, markVoteError, dispatch, canView, page, rowsPerPage, appliedFilters]);
+  }, [markVoteStatus, lastMarkVoteResult, markVoteError, dispatch, canView, page, rowsPerPage, appliedFilters]);
 
   const totalPages = Math.max(1, Math.ceil((total || myVoters.length || 0) / rowsPerPage));
   const totalItems = total || myVoters.length || 0;
@@ -210,10 +214,10 @@ export default function MyVotersScreen({ navigation }) {
                           <Button
                             compact
                             mode="outlined"
-                            disabled={!canMarkVoted || markVoteStatus === "loading"}
+                            disabled={!canMarkVoted || markVoteStatus === "loading" || Boolean(v?.pendingVote)}
                             onPress={() => dispatch(markAsyncVoterVoted({ voterId: v?.id }))}
                           >
-                            Add
+                            {v?.pendingVote ? "Queued" : "Add"}
                           </Button>
                         </View>
                       </DataTable.Cell>

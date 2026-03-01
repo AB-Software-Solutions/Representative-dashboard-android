@@ -1,4 +1,6 @@
 import "react-native-gesture-handler";
+// Helps debug early startup crashes (before React renders anything)
+import "./src/setup/earlyErrorHandler";
 
 import React from "react";
 import { DarkTheme as NavigationDarkTheme, DefaultTheme as NavigationDefaultTheme, NavigationContainer } from "@react-navigation/native";
@@ -13,8 +15,16 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Provider as ReduxProvider } from "react-redux";
 
 import { AuthProvider } from "./src/auth/AuthProvider";
+import { useAuth } from "./src/auth/useAuth";
 import RootNavigator from "./src/navigation/RootNavigator";
 import { store } from "./src/redux/store";
+import { useOutboxSyncWorker } from "./src/offline/useOutboxSyncWorker";
+
+function OutboxSyncBootstrap() {
+  const { status } = useAuth();
+  useOutboxSyncWorker(status === "authenticated");
+  return null;
+}
 
 export default function App() {
   const colorScheme = useColorScheme();
@@ -68,6 +78,7 @@ export default function App() {
   return (
     <ReduxProvider store={store}>
       <AuthProvider>
+        <OutboxSyncBootstrap />
         <PaperProvider theme={paperTheme}>
           <SafeAreaProvider>
             <NavigationContainer theme={navTheme}>

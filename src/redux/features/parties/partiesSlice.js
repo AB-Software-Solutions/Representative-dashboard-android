@@ -1,12 +1,29 @@
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
+import NetInfo from "@react-native-community/netinfo";
 
 import { createVotingInfo, createWhiteVote, fetchParties } from "../../../api/parties";
+import { database } from "../../../db/database";
+import { queryCachedParties } from "../../../db/helpers";
+import { enqueueOutboxItem, OUTBOX_TYPE } from "../../../offline/outbox";
 
 export const fetchAsyncParties = createAsyncThunk(
   "parties/fetch",
   async (_, { rejectWithValue }) => {
     try {
-      return await fetchParties();
+      const net = await NetInfo.fetch();
+      const online = Boolean(net?.isConnected && net?.isInternetReachable !== false);
+      if (!online) {
+        const cached = await queryCachedParties(database);
+        return { politicalAffiliations: cached, fromCache: true };
+      }
+
+      const payload = await fetchParties();
+      const parties =
+        payload?.politicalAffiliations ||
+        payload?.parties ||
+        payload?.data ||
+        (Array.isArray(payload) ? payload : []);
+      return payload;
     } catch (e) {
       return rejectWithValue(e?.message || "Failed to fetch political affiliations");
     }
@@ -17,7 +34,18 @@ export const createAsyncVotingInfo = createAsyncThunk(
   "parties/createVotingInfo",
   async ({ politicalAffiliationId, memberId }, { rejectWithValue }) => {
     try {
-      return await createVotingInfo({ politicalAffiliationId, memberId });
+      const net = await NetInfo.fetch();
+      const online = Boolean(net?.isConnected && net?.isInternetReachable !== false);
+      if (!online) {
+        await enqueueOutboxItem({
+          type: OUTBOX_TYPE.ADD_PARTY_VOTE,
+          payload: { politicalAffiliationId, memberId },
+        });
+        return { queued: true };
+      }
+
+      const res = await createVotingInfo({ politicalAffiliationId, memberId });
+      return res;
     } catch (e) {
       return rejectWithValue(e?.message || "Failed to add voting info");
     }
@@ -28,7 +56,15 @@ export const createAsyncWhiteVote = createAsyncThunk(
   "parties/createWhiteVote",
   async (_, { rejectWithValue }) => {
     try {
-      return await createWhiteVote();
+      const net = await NetInfo.fetch();
+      const online = Boolean(net?.isConnected && net?.isInternetReachable !== false);
+      if (!online) {
+        await enqueueOutboxItem({ type: OUTBOX_TYPE.WHITE_VOTE, payload: {} });
+        return { queued: true };
+      }
+
+      const res = await createWhiteVote();
+      return res;
     } catch (e) {
       return rejectWithValue(e?.message || "Failed to add white vote");
     }

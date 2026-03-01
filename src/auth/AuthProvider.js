@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useReducer } from "react";
+import React, { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import {
   fetchAuthSession,
   fetchUserAttributes,
@@ -14,6 +14,10 @@ import { resetReduxState } from "../redux/store";
 import { ROLES } from "../constants/roles";
 import { PERMISSIONS } from "../constants/permissions";
 import { getUserByEmail } from "../api/users";
+import { hydrateAfterLogin } from "../offline/hydrateAfterLogin";
+import { resetLocalDatabase } from "../db/resetLocalDatabase";
+import NetInfo from "@react-native-community/netinfo";
+import { clearLastKnownUser, loadLastKnownUser, saveLastKnownUser } from "./persistedAuth";
 
 const initialState = {
   status: "loading", // loading | authenticated | unauthenticated
@@ -104,6 +108,12 @@ function toUserModel(attributes) {
 
 export function AuthProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const hydratedForUserIdRef = useRef(null);
+  const authStateRef = useRef({ status: state.status, userId: state.user?.id || null });
+
+  useEffect(() => {
+    authStateRef.current = { status: state.status, userId: state.user?.id || null };
+  }, [state.status, state.user?.id]);
 
   const forceLogoutWithError = useCallback(async (message) => {
     try {
@@ -165,7 +175,24 @@ export function AuthProvider({ children }) {
         type: "INITIAL",
         payload: { user: mergedUser, tokens },
       });
+
+      // Persist last-known user so we can show an authenticated offline experience later
+      saveLastKnownUser(mergedUser);
     } catch (e) {
+      // If offline, we may still be logged in (cached session) OR at least have a last-known user snapshot.
+      try {
+        const net = await NetInfo.fetch();
+        const online = Boolean(net?.isConnected && net?.isInternetReachable !== false);
+        if (!online) {
+          const cachedUser = await loadLastKnownUser();
+          if (cachedUser) {
+            dispatch({ type: "INITIAL", payload: { user: cachedUser, tokens: null } });
+            return;
+          }
+        }
+      } catch {
+        // ignore
+      }
       dispatch({ type: "INITIAL", payload: { user: null, tokens: null } });
     }
   }, [forceLogoutWithError]);
@@ -173,6 +200,25 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     initialize();
   }, [initialize]);
+
+  // Immediately after a successful login, cache all Parties + all My Voters for offline use.
+  useEffect(() => {
+    const userId = state.user?.id || null;
+    if (state.status !== "authenticated" || !userId) return;
+    if (hydratedForUserIdRef.current === userId) return;
+    hydratedForUserIdRef.current = userId;
+
+    const shouldStop = () => {
+      const cur = authStateRef.current;
+      return cur.status !== "authenticated" || cur.userId !== userId;
+    };
+
+    hydrateAfterLogin({ shouldStop }).catch((e) => {
+      // Non-fatal; app still works with on-demand caching
+      // eslint-disable-next-line no-console
+      console.warn("[AuthProvider] hydrateAfterLogin failed:", e?.message || e);
+    });
+  }, [state.status, state.user?.id]);
 
   const login = useCallback(async ({ username, password }) => {
     try {
@@ -262,15 +308,33 @@ export function AuthProvider({ children }) {
   }, []);
 
   const logout = useCallback(async () => {
+    // Immediately switch UI to logged-out state (also disables outbox worker via App.js)
+    hydratedForUserIdRef.current = null;
+    authStateRef.current = { status: "unauthenticated", userId: null };
+    try {
+      resetReduxState();
+    } catch (e) {
+      // ignore (e.g. store not ready)
+    }
+    dispatch({ type: "LOGOUT" });
+
+    // Then perform cleanup (best-effort)
+    try {
+      // Ensure cached voters/parties/outbox are cleared so next login starts fresh.
+      await resetLocalDatabase();
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn("[AuthProvider] resetLocalDatabase failed:", e?.message || e);
+    }
+    try {
+      await clearLastKnownUser();
+    } catch {
+      // ignore
+    }
     try {
       await signOut();
-    } finally {
-      try {
-        resetReduxState();
-      } catch (e) {
-        // ignore (e.g. store not ready)
-      }
-      dispatch({ type: "LOGOUT" });
+    } catch (e) {
+      // ignore (already logged out locally)
     }
   }, []);
 

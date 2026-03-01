@@ -46,8 +46,10 @@ export default function PartiesScreen() {
     error,
     createVoteStatus,
     createVoteError,
+    lastCreatedVote,
     createWhiteVoteStatus,
     createWhiteVoteError,
+    lastCreatedWhiteVote,
   } = useSelector((s) => s.parties);
 
   const canView = user?.permissions?.includes(PERMISSIONS.VIEW_PARTIES);
@@ -70,7 +72,13 @@ export default function PartiesScreen() {
 
   useEffect(() => {
     if (createVoteStatus === "succeeded") {
-      setSnack("Successfully Added Vote Party Voted Count");
+      setSnack(
+        lastCreatedVote?.queued
+          ? "Offline: action queued. It will sync automatically when you're online."
+          : "Successfully Added Vote Party Voted Count"
+      );
+      // Refresh list after online mutation (no local DB upsert)
+      if (!lastCreatedVote?.queued) dispatch(fetchAsyncParties());
       setVoteOpen(false);
       setActiveParty(null);
       setSelectedMemberId(null);
@@ -79,17 +87,23 @@ export default function PartiesScreen() {
     if (createVoteStatus === "failed") {
       setSnack(createVoteError || "Action failed");
     }
-  }, [createVoteStatus, createVoteError]);
+  }, [createVoteStatus, createVoteError, lastCreatedVote]);
 
   useEffect(() => {
     if (createWhiteVoteStatus === "succeeded") {
-      setSnack("Successfully Added White Vote");
+      setSnack(
+        lastCreatedWhiteVote?.queued
+          ? "Offline: action queued. It will sync automatically when you're online."
+          : "Successfully Added White Vote"
+      );
+      // Refresh list after online mutation (no local DB upsert)
+      if (!lastCreatedWhiteVote?.queued) dispatch(fetchAsyncParties());
       setWhiteVoteConfirmOpen(false);
     }
     if (createWhiteVoteStatus === "failed") {
       setSnack(createWhiteVoteError || "Action failed");
     }
-  }, [createWhiteVoteStatus, createWhiteVoteError]);
+  }, [createWhiteVoteStatus, createWhiteVoteError, lastCreatedWhiteVote]);
 
   useEffect(() => {
     setPage(0);
