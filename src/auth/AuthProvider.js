@@ -311,12 +311,12 @@ export function AuthProvider({ children }) {
     // Immediately switch UI to logged-out state (also disables outbox worker via App.js)
     hydratedForUserIdRef.current = null;
     authStateRef.current = { status: "unauthenticated", userId: null };
-    try {
-      resetReduxState();
-    } catch (e) {
-      // ignore (e.g. store not ready)
-    }
-    dispatch({ type: "LOGOUT" });
+      try {
+        resetReduxState();
+      } catch (e) {
+        // ignore (e.g. store not ready)
+      }
+      dispatch({ type: "LOGOUT" });
 
     // Then perform cleanup (best-effort)
     try {

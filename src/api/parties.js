@@ -16,16 +16,15 @@ export async function fetchParties() {
 
 export async function createVotingInfo({ politicalAffiliationId, memberId }) {
   if (!politicalAffiliationId) throw new Error("politicalAffiliationId is required");
-  if (!memberId) throw new Error("memberId is required");
 
   const restOperation = post({
     apiName: AMPLIFY_API.apiName,
     path: `/political-affiliations/${politicalAffiliationId}/votings`,
     options: {
-      body: {
-        votedForParty: politicalAffiliationId,
-        memberId,
-      },
+      // Match ElectionDashboard behavior:
+      // - send `{ memberId }` when a member is selected
+      // - otherwise send `{}` (party vote without targeting a member)
+      body: memberId ? { memberId } : {},
     },
   });
 

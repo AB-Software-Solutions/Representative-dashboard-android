@@ -185,6 +185,14 @@ export default function PartiesScreen() {
                             setSelectedMemberId(null);
                             setMemberQuery("");
                             setVoteOpen(true);
+                            if (__DEV__) {
+                              // eslint-disable-next-line no-console
+                              console.log("[parties] open add-vote", {
+                                partyId: p?.id || p?._id,
+                                partyName: partyName(p),
+                                membersCount: Array.isArray(p?.members) ? p.members.length : null,
+                              });
+                            }
                           }}
                         >
                           Add Vote
@@ -243,6 +251,10 @@ export default function PartiesScreen() {
               Party: <Text style={{ fontWeight: "700" }}>{partyName(activeParty)}</Text>
             </Text>
 
+            <Text style={{ marginBottom: 8, opacity: 0.8 }}>
+              Select a member (optional). You can add a party vote without selecting any member.
+            </Text>
+
             <Searchbar placeholder="Search options..." value={memberQuery} onChangeText={setMemberQuery} />
 
             <View style={{ marginTop: 12, maxHeight: 260 }}>
@@ -275,12 +287,12 @@ export default function PartiesScreen() {
             <Button onPress={() => setVoteOpen(false)}>Cancel</Button>
             <Button
               loading={createVoteStatus === "loading"}
-              disabled={!activeParty?.id || !selectedMemberId || createVoteStatus === "loading"}
+              disabled={!(activeParty?.id || activeParty?._id) || createVoteStatus === "loading"}
               onPress={() => {
                 dispatch(
                   createAsyncVotingInfo({
                     politicalAffiliationId: activeParty?.id || activeParty?._id,
-                    memberId: selectedMemberId,
+                    memberId: selectedMemberId || undefined,
                   })
                 );
               }}

@@ -11,6 +11,7 @@ import { database } from "../../../db/database";
 import {
   getCachedVoterById,
   queryCachedVoters,
+  upsertVoters,
   setVoterPendingVote,
   updateVoterVoteState,
 } from "../../../db/helpers";
@@ -81,11 +82,36 @@ export const fetchAsyncVoterById = createAsyncThunk(
       const online = Boolean(net?.isConnected && net?.isInternetReachable !== false);
       if (!online) {
         const cached = await getCachedVoterById(database, voterId);
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.log("[voterById] offline cache", {
+            voterId,
+            hasGovernorate: Boolean(cached?.governorate || cached?.governate),
+            politicalAffiliationName: cached?.politicalAffiliation?.name ?? null,
+            hasParty: Boolean(cached?.party),
+          });
+        }
         if (cached) return cached;
         return rejectWithValue("Offline and voter not in cache yet");
       }
 
       const data = await fetchVoterById({ voterId });
+      // Cache the full voter payload so relations are available offline after opening the profile once.
+      // Merge-safe: will not wipe existing hydrated relation fields.
+      const updated = await updateVoterVoteState(database, voterId, { raw: data });
+      if (!updated) {
+        // Safety: if record wasn't created by login hydration for some reason, create it now.
+        await upsertVoters(database, [data]);
+      }
+      if (__DEV__) {
+        // eslint-disable-next-line no-console
+        console.log("[voterById] online fetched+cached", {
+          voterId,
+          hasGovernorate: Boolean(data?.governorate || data?.governate),
+          politicalAffiliationName: data?.politicalAffiliation?.name ?? null,
+          hasParty: Boolean(data?.party),
+        });
+      }
       return data;
     } catch (e) {
       return rejectWithValue(e?.message || "Failed to fetch voter");

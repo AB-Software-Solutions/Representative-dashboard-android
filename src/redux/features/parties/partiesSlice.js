@@ -39,7 +39,7 @@ export const createAsyncVotingInfo = createAsyncThunk(
       if (!online) {
         await enqueueOutboxItem({
           type: OUTBOX_TYPE.ADD_PARTY_VOTE,
-          payload: { politicalAffiliationId, memberId },
+          payload: { politicalAffiliationId, memberId: memberId || null },
         });
         return { queued: true };
       }

@@ -10,6 +10,32 @@ function safeId(x) {
   return s ? s : null;
 }
 
+function isPlainObject(v) {
+  return Boolean(v) && typeof v === "object" && !Array.isArray(v);
+}
+
+// Normalize backend payload variants into what the UI expects (especially for offline reads).
+function normalizeVoterRaw(v) {
+  if (!isPlainObject(v)) return v || null;
+  const out = { ...v };
+
+  // API sometimes uses `governate` but UI expects `governorate`
+  if ((out.governorate === undefined || out.governorate === null) && out.governate !== undefined) out.governorate = out.governate;
+  if ((out.governorateId === undefined || out.governorateId === null) && out.governateId !== undefined) out.governorateId = out.governateId;
+
+  return out;
+}
+
+function normalizePartyRaw(p) {
+  if (!isPlainObject(p)) return p || null;
+  const out = { ...p };
+  // Some APIs use `title`; UI uses `name`
+  if (out.name === undefined && out.title !== undefined) out.name = out.title;
+  // Ensure members is always an array so offline UI doesn't think it's "missing"
+  if (!Array.isArray(out.members)) out.members = [];
+  return out;
+}
+
 function voterToRow(v) {
   const id = safeId(v?.id ?? v?._id);
   if (!id) return null;
@@ -18,7 +44,7 @@ function voterToRow(v) {
     name: String(v?.name ?? v?.fullName ?? "").trim() || null,
     recordNumber: v?.recordNumber !== undefined && v?.recordNumber !== null ? String(v.recordNumber) : null,
     hasVoted: Boolean(v?.hasVoted ?? v?.voted ?? v?.isVoted ?? v?.voteConfirmed ?? v?.has_vote ?? v?.has_vote_confirmed),
-    raw: v || null,
+    raw: normalizeVoterRaw(v),
     updatedAt: nowMs(),
   };
 }
@@ -29,7 +55,7 @@ function partyToRow(p) {
   return {
     id,
     name: String(p?.name ?? p?.title ?? "").trim() || null,
-    raw: p || null,
+    raw: normalizePartyRaw(p),
     updatedAt: nowMs(),
   };
 }
@@ -135,7 +161,7 @@ export async function getCachedVoterById(database, voterId) {
   const collection = database.collections.get("voters");
   try {
     const record = await collection.find(id);
-    return record?.raw || null;
+    return normalizeVoterRaw(record?.raw || null);
   } catch {
     return null;
   }
@@ -159,7 +185,11 @@ export async function queryCachedVoters(database, { page = 1, limit = 20, filter
     .query(...conditions, Q.sortBy("name", Q.asc), Q.skip(offset), Q.take(limit))
     .fetch();
 
-  const voters = rows.map((r) => r.raw || { id: r.id, name: r.name, recordNumber: r.recordNumber, hasVoted: r.hasVoted });
+  const voters = rows.map((r) =>
+    normalizeVoterRaw(
+      r.raw || { id: r.id, name: r.name, recordNumber: r.recordNumber, hasVoted: r.hasVoted, pendingVote: r.pendingVote }
+    )
+  );
   if (__DEV__) {
     // eslint-disable-next-line no-console
     console.log("[cache] voters", { page, limit, total, returned: voters.length, filters: { name, recordNumber } });
@@ -170,12 +200,26 @@ export async function queryCachedVoters(database, { page = 1, limit = 20, filter
 export async function queryCachedParties(database) {
   const collection = database.collections.get("parties");
   const rows = await collection.query(Q.sortBy("name", Q.asc)).fetch();
-  const parties = rows.map((r) => r.raw || { id: r.id, name: r.name });
+  const parties = rows.map((r) =>
+    normalizePartyRaw(r.raw || { id: r.id, name: r.name, members: [] })
+  );
   if (__DEV__) {
     // eslint-disable-next-line no-console
     console.log("[cache] parties", { total: parties.length });
   }
   return parties;
+}
+
+export async function getCachedPartyById(database, partyId) {
+  const id = safeId(partyId);
+  if (!id) return null;
+  const collection = database.collections.get("parties");
+  try {
+    const record = await collection.find(id);
+    return normalizePartyRaw(record?.raw || null);
+  } catch {
+    return null;
+  }
 }
 
 export async function setVoterPendingVote(database, voterId, pending) {
@@ -207,7 +251,17 @@ export async function updateVoterVoteState(database, voterId, { hasVoted, pendin
       await record.update((rec) => {
         if (hasVoted !== undefined) rec.hasVoted = Boolean(hasVoted);
         if (pendingVote !== undefined) rec.pendingVote = Boolean(pendingVote);
-        if (raw !== undefined) rec.raw = raw;
+        // IMPORTANT: never overwrite a fully-hydrated `raw` object with a partial API response.
+        // Merge shallowly to preserve relation fields already cached.
+        if (raw !== undefined) {
+          const nextRaw = normalizeVoterRaw(raw);
+          const prevRaw = rec.raw;
+          if (isPlainObject(prevRaw) && isPlainObject(nextRaw)) {
+            rec.raw = { ...prevRaw, ...nextRaw };
+          } else {
+            rec.raw = nextRaw;
+          }
+        }
         rec.updatedAt = nowMs();
       });
     });
