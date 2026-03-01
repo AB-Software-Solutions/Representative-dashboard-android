@@ -154,9 +154,18 @@ const representativeSlice = createSlice({
       const updated = action.payload?.updated;
       if (!voterId || !updated) return;
       const idx = state.myVoters.findIndex((v) => v?.id === voterId || v?.id === updated?.id);
-      if (idx !== -1) {
-        state.myVoters[idx] = { ...(state.myVoters[idx] || {}), ...(updated || {}), pendingVote: false };
+      if (idx === -1) return;
+
+      const votedNow = Boolean(updated?.hasVoted ?? updated?.isVoted ?? updated?.hasVotedConfirmed ?? updated?.voteConfirmed);
+      // MyVoters list is meant to show only NOT-VOTED voters.
+      // When an offline queued "mark voted" is synced, remove it immediately from the list.
+      if (votedNow) {
+        state.myVoters.splice(idx, 1);
+        if (typeof state.total === "number") state.total = Math.max(0, state.total - 1);
+        return;
       }
+
+      state.myVoters[idx] = { ...(state.myVoters[idx] || {}), ...(updated || {}), pendingVote: false };
     },
   },
   extraReducers: (builder) => {

@@ -174,6 +174,9 @@ export async function queryCachedVoters(database, { page = 1, limit = 20, filter
   const collection = database.collections.get("voters");
 
   const conditions = [];
+  // My Voters screen should only show voters who are NOT voted yet.
+  // Keep queued ones in the list: queued state is `pendingVote=true` while `hasVoted=false`.
+  conditions.push(Q.where("has_voted", false));
   if (name) conditions.push(Q.where("name", Q.like(`%${name}%`)));
   if (recordNumber) conditions.push(Q.where("record_number", Q.like(`%${recordNumber}%`)));
 

@@ -47,7 +47,12 @@ export async function flushOutbox({ onVoterUpdated } = {}) {
           // Do not upsert full datasets after login hydration; only update minimal state.
           await updateVoterVoteState(database, voterId, { hasVoted: true, pendingVote: false, raw: updated });
           await setVoterPendingVote(database, voterId, false);
-          if (onVoterUpdated) onVoterUpdated({ voterId, updated });
+          // Backend may return a minimal/partial payload. Make sure the UI gets a clear "voted" signal.
+          if (onVoterUpdated)
+            onVoterUpdated({
+              voterId,
+              updated: { ...(updated && typeof updated === "object" ? updated : {}), id: voterId, hasVoted: true, pendingVote: false },
+            });
           await removeOutboxItem(item);
           processed += 1;
           continue;
